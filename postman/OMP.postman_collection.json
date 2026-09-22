@@ -1,0 +1,258 @@
+{
+  "info": {
+    "name": "OMP - Order Management Platform",
+    "description": "Colección Postman del reto backend. Flujos: autenticación (OAuth 2.0/OIDC), crear/consultar/cancelar pedidos, historial e inventario. Todas las peticiones propagan X-Trace-Id.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080" },
+    { "key": "keycloakUrl", "value": "http://localhost:8083" },
+    { "key": "token", "value": "" },
+    { "key": "orderId", "value": "" },
+    { "key": "productId", "value": "00000000-0000-0000-0000-000000000001" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Obtener token (password grant)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const data = pm.response.json();",
+                  "pm.collectionVariables.set('token', data.access_token);",
+                  "pm.test('access_token presente', () => pm.expect(data.access_token).to.be.a('string'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "grant_type", "value": "password" },
+                { "key": "client_id", "value": "reto-api-client" },
+                { "key": "client_secret", "value": "reto-api-client-secret" },
+                { "key": "username", "value": "testuser" },
+                { "key": "password", "value": "password" }
+              ]
+            },
+            "url": {
+              "raw": "{{keycloakUrl}}/realms/reto-backend/protocol/openid-connect/token",
+              "host": ["{{keycloakUrl}}"],
+              "path": ["realms", "reto-backend", "protocol", "openid-connect", "token"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Orders",
+      "item": [
+        {
+          "name": "Crear pedido (stock disponible)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": { "exec": ["pm.variables.set('traceId', pm.variables.replaceIn('{{$guid}}'));"], "type": "text/javascript" }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const d = pm.response.json();",
+                  "pm.collectionVariables.set('orderId', d.orderId);",
+                  "pm.test('201 y CONFIRMED', () => { pm.expect(pm.response.code).to.eql(201); pm.expect(d.status).to.eql('CONFIRMED'); });",
+                  "pm.test('traceId coincide', () => pm.expect(pm.response.headers.get('X-Trace-Id')).to.eql(pm.variables.get('traceId')));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "X-Trace-Id", "value": "{{traceId}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"testuser\",\n  \"productId\": \"{{productId}}\",\n  \"quantity\": 2\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/orders", "host": ["{{baseUrl}}"], "path": ["api", "v1", "orders"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Crear pedido (stock insuficiente)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": { "exec": ["pm.variables.set('traceId', pm.variables.replaceIn('{{$guid}}'));"], "type": "text/javascript" }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const d = pm.response.json();",
+                  "pm.test('409 y STOCK_INSUFFICIENT', () => { pm.expect(pm.response.code).to.eql(409); pm.expect(d.code).to.eql('STOCK_INSUFFICIENT'); });",
+                  "pm.test('error con traceId', () => pm.expect(d.traceId).to.eql(pm.variables.get('traceId')));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "X-Trace-Id", "value": "{{traceId}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"testuser\",\n  \"productId\": \"00000000-0000-0000-0000-000000000003\",\n  \"quantity\": 999\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/orders", "host": ["{{baseUrl}}"], "path": ["api", "v1", "orders"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar estado del pedido",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "X-Trace-Id", "value": "{{$guid}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}", "host": ["{{baseUrl}}"], "path": ["api", "v1", "orders", "{{orderId}}"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar historial del pedido",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "X-Trace-Id", "value": "{{$guid}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}/history", "host": ["{{baseUrl}}"], "path": ["api", "v1", "orders", "{{orderId}}", "history"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Cancelar pedido",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const d = pm.response.json();",
+                  "pm.test('200 y CANCELLED', () => { pm.expect(pm.response.code).to.eql(200); pm.expect(d.status).to.eql('CANCELLED'); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "X-Trace-Id", "value": "{{$guid}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}/cancel", "host": ["{{baseUrl}}"], "path": ["api", "v1", "orders", "{{orderId}}", "cancel"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Cancelar pedido ya cancelado (transición inválida)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const d = pm.response.json();",
+                  "pm.test('409 y INVALID_TRANSITION', () => { pm.expect(pm.response.code).to.eql(409); pm.expect(d.code).to.eql('INVALID_TRANSITION'); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "X-Trace-Id", "value": "{{$guid}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}/cancel", "host": ["{{baseUrl}}"], "path": ["api", "v1", "orders", "{{orderId}}", "cancel"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Sin token (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const d = pm.response.json();",
+                  "pm.test('401 y traceId', () => { pm.expect(pm.response.code).to.eql(401); pm.expect(d).to.have.property('traceId'); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Trace-Id", "value": "{{$guid}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}", "host": ["{{baseUrl}}"], "path": ["api", "v1", "orders", "{{orderId}}"] }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Inventory",
+      "item": [
+        {
+          "name": "Consultar producto",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "X-Trace-Id", "value": "{{$guid}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/products/{{productId}}", "host": ["{{baseUrl}}"], "path": ["api", "v1", "products", "{{productId}}"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Validar stock",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "X-Trace-Id", "value": "{{$guid}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": \"{{productId}}\",\n  \"quantity\": 1\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/products/validate", "host": ["{{baseUrl}}"], "path": ["api", "v1", "products", "validate"] }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

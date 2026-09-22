@@ -1,0 +1,37 @@
+spring:
+  application:
+    name: order-service
+  r2dbc:
+    url: ${POSTGRES_URL:r2dbc:postgresql://localhost:5432/order_db}
+    username: ${POSTGRES_USER:reto_user}
+    password: ${POSTGRES_PASSWORD:reto_pass}
+  sql:
+    init:
+      mode: always
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8083/realms/reto-backend}
+          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8083/realms/reto-backend/protocol/openid-connect/certs}
+
+server:
+  port: 8081
+
+inventory:
+  service:
+    url: ${INVENTORY_SERVICE_URL:http://localhost:8082}
+
+trace:
+  header-name: X-Trace-Id
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+
+logging:
+  pattern:
+    level: "%5p [X-Trace-Id=%X{traceId:-}]"

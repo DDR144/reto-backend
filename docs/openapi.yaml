@@ -1,0 +1,352 @@
+openapi: 3.0.3
+info:
+  title: Order Management Platform (OMP) API
+  description: |
+    API del reto técnico backend. Un API Gateway expone dos microservicios
+    (Order Service e Inventory Service) con autenticación OAuth 2.0/OIDC vía JWT
+    y trazabilidad end-to-end mediante la cabecera X-Trace-Id.
+
+    Errores estándar: `{ timestamp, status, code, message, traceId }`.
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8080
+    description: API Gateway (único punto de entrada)
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Orders
+    description: Creación, consulta, historial y cancelación de pedidos.
+  - name: Inventory
+    description: Consulta y validación de stock de productos.
+
+paths:
+  /api/v1/orders:
+    post:
+      tags: [Orders]
+      summary: Registrar un nuevo pedido
+      description: |
+        Valida disponibilidad de stock en el Inventory Service antes de confirmar.
+        Si hay stock, el pedido queda CONFIRMED; si no, responde STOCK_INSUFFICIENT
+        y el pedido no se confirma.
+      parameters:
+        - $ref: '#/components/parameters/XTraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          description: Pedido creado y confirmado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Stock insuficiente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                timestamp: '2026-01-01T10:00:00.000Z'
+                status: 409
+                code: STOCK_INSUFFICIENT
+                message: Insufficient stock for product 00000000-0000-0000-0000-000000000001
+                traceId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+
+  /api/v1/orders/{orderId}:
+    get:
+      tags: [Orders]
+      summary: Consultar el estado actual de un pedido
+      parameters:
+        - $ref: '#/components/parameters/XTraceId'
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Pedido encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/orders/{orderId}/history:
+    get:
+      tags: [Orders]
+      summary: Consultar el historial de cambios de estado de un pedido
+      parameters:
+        - $ref: '#/components/parameters/XTraceId'
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Lista de cambios de estado (un registro por transición).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrderHistory'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/orders/{orderId}/cancel:
+    post:
+      tags: [Orders]
+      summary: Cancelar un pedido si su estado lo permite
+      description: |
+        Solo se puede cancelar un pedido en PENDING o CONFIRMED.
+        Cancelar un pedido ya cancelado devuelve INVALID_TRANSITION.
+      parameters:
+        - $ref: '#/components/parameters/XTraceId'
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Pedido cancelado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Transición de estado inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                timestamp: '2026-01-01T10:00:00.000Z'
+                status: 409
+                code: INVALID_TRANSITION
+                message: Cannot cancel order in state CANCELLED
+                traceId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+
+  /api/v1/products/{productId}:
+    get:
+      tags: [Inventory]
+      summary: Consultar un producto y su stock actual
+      parameters:
+        - $ref: '#/components/parameters/XTraceId'
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Producto encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/products/validate:
+    post:
+      tags: [Inventory]
+      summary: Validar y descontar stock de forma atómica
+      description: |
+        Descuento condicional y atómico (UPDATE ... WHERE stock >= quantity).
+        Devuelve CONFIRMED si se descontó, STOCK_INSUFFICIENT en caso contrario.
+      parameters:
+        - $ref: '#/components/parameters/XTraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StockValidationRequest'
+      responses:
+        '200':
+          description: Resultado de la validación.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockValidationResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT emitido por Keycloak (realm reto-backend).
+
+  parameters:
+    XTraceId:
+      name: X-Trace-Id
+      in: header
+      required: false
+      description: Identificador de trazabilidad end-to-end. Si no se envía, el gateway lo genera.
+      schema:
+        type: string
+        format: uuid
+    OrderId:
+      name: orderId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    Unauthorized:
+      description: Token ausente, inválido o expirado.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            timestamp: '2026-01-01T10:00:00.000Z'
+            status: 401
+            code: UNAUTHORIZED
+            message: Missing or invalid token
+            traceId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+    NotFound:
+      description: Recurso no encontrado.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            timestamp: '2026-01-01T10:00:00.000Z'
+            status: 404
+            code: ORDER_NOT_FOUND
+            message: Order not found
+            traceId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+
+  schemas:
+    OrderStatus:
+      type: string
+      enum: [PENDING, CONFIRMED, CANCELLED]
+
+    Order:
+      type: object
+      properties:
+        orderId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+        productId:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+        traceId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    OrderHistory:
+      type: object
+      properties:
+        historyId:
+          type: string
+          format: uuid
+        orderId:
+          type: string
+          format: uuid
+        fromStatus:
+          $ref: '#/components/schemas/OrderStatus'
+          nullable: true
+        toStatus:
+          $ref: '#/components/schemas/OrderStatus'
+        changedAt:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+
+    Product:
+      type: object
+      properties:
+        productId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        stock:
+          type: integer
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateOrderRequest:
+      type: object
+      required: [userId, productId, quantity]
+      properties:
+        userId:
+          type: string
+        productId:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+
+    StockValidationRequest:
+      type: object
+      required: [productId, quantity]
+      properties:
+        productId:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+
+    StockValidationResponse:
+      type: object
+      properties:
+        productId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [CONFIRMED, STOCK_INSUFFICIENT, PRODUCT_NOT_FOUND]
+        traceId:
+          type: string
+
+    ErrorResponse:
+      type: object
+      required: [timestamp, status, code, message, traceId]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+        code:
+          type: string
+        message:
+          type: string
+        traceId:
+          type: string
