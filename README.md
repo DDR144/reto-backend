@@ -60,6 +60,21 @@ Esperar a que `postgres` y `keycloak` estén `healthy`. Después:
 - Swagger UI Inventory Service: `http://localhost:8082/swagger-ui.html`
 - Keycloak admin: `http://localhost:8083` (admin / admin)
 
+## Compilación (sin Docker)
+
+No hay un POM agregador en la raíz: **cada módulo se construye por separado**,
+desde su propio directorio y con su propio wrapper de Maven.
+
+```bash
+cd api-gateway          && ./mvnw clean package
+cd ../order-service     && ./mvnw clean package
+cd ../inventory-service && ./mvnw clean package
+```
+
+Cada módulo deja su JAR en `<módulo>/target/`. La compilación no necesita Docker,
+Keycloak ni PostgreSQL en ejecución: las pruebas usan repositorios y clientes
+mockeados.
+
 ## Autenticación
 
 Realm importado automáticamente: `reto-backend`.
@@ -120,13 +135,17 @@ Códigos: `UNAUTHORIZED`, `STOCK_INSUFFICIENT`, `INVALID_TRANSITION`,
 ### Pruebas unitarias (JUnit 5 + Mockito + StepVerifier)
 
 ```bash
-cd order-service && ./mvnw test
-cd inventory-service && ./mvnw test
+cd api-gateway       && ./mvnw test
+cd ../order-service  && ./mvnw test
+cd ../inventory-service && ./mvnw test
 ```
 
+- `ApiGatewayApplicationTests`: carga de contexto del gateway (1 caso).
 - `OrderStatusTest`: máquina de estados de pedido (6 casos).
 - `OrderServiceTest`: creación/consulta/cancelación con repositorios y cliente mockeados (8 casos).
 - `InventoryControllerTest`: validación de stock y consulta de producto (5 casos).
+
+Total: **20 casos de prueba**, todos offline (sin Docker ni servicios externos).
 
 ### Escenarios de prueba (Postman)
 
